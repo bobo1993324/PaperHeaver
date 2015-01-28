@@ -1,9 +1,12 @@
 #ifndef GOOGLEDRIVEMODEL_H
 #define GOOGLEDRIVEMODEL_H
 
+#include <QList>
 #include <QAbstractItemModel>
 #include <QNetworkAccessManager>
 #include <QSettings>
+#include <QHash>
+#include "filetreeitem.h"
 
 namespace PageHeaver {
 
@@ -18,6 +21,11 @@ class GoogleDriveModel : public QAbstractItemModel
     Q_PROPERTY(QString accessToken READ accessToken WRITE setAccessToken NOTIFY accessTokenChanged)
     Q_PROPERTY(QString refreshToken READ refreshToken WRITE setRefreshToken NOTIFY refreshTokenChanged)
 
+    enum {
+        RoleFileTitle = Qt::UserRole + 1,
+        RoleFileMimeType,
+        RoleFileAlternateLink
+    };
 public:
     explicit GoogleDriveModel(QObject *parent = 0);
     ~GoogleDriveModel();
@@ -30,6 +38,9 @@ public:
     virtual int rowCount(const QModelIndex &parent = QModelIndex()) const;
     virtual int columnCount(const QModelIndex &parent = QModelIndex()) const;
     virtual QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const;
+    virtual QHash<int,QByteArray> roleNames() const;
+
+    QModelIndex index(FileTreeItem *item);
 
     void setAuthorizationCode(QString code);
     void setClientId(QString clientId);
@@ -41,8 +52,8 @@ public:
     QString accessToken();
     QString refreshToken();
 
-    void requestListChildren(QString parentName);
     Q_INVOKABLE void requestRefreshToken();
+    Q_INVOKABLE void requestUploadFile(QString localFileUrl);
 signals:
 
     void accessTokenChanged();
@@ -57,6 +68,7 @@ public slots:
 
 private:
     void requestAccessToken(QString code);
+    void requestListChildren(QString parentName);
 
     QNetworkAccessManager conManager;
     QString m_clientId;
@@ -64,6 +76,7 @@ private:
     QString m_redirectUri;
     QString m_accessToken;
     QString m_refreshToken;
+    QHash<QString, FileTreeItem *> m_fileTreeMap; // parentId,
 
 };
 

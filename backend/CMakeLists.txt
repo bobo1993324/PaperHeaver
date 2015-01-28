@@ -5,6 +5,8 @@ include_directories(
 set(
     Paperheaverbackend_SRCS
     modules/Paperheaver/backend.cpp
+    modules/Paperheaver/filemodel.cpp
+    modules/Paperheaver/filetreeitem.cpp
     modules/Paperheaver/googledrivemodel.cpp
     modules/Paperheaver/mytype.cpp
 )

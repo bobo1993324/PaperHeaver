@@ -5,7 +5,7 @@ import U1db 1.0
 Item {
     id: root
     property string accessToken
-    property string refresh_token
+    property string refreshToken
     signal noAccessTokenStored()
 
     function storeAccessToken(accessToken) {
@@ -39,11 +39,12 @@ Item {
         }
     }
     Component.onCompleted: {
-        accessToken = aDocument.contents.accessToken;
-        refreshToken = aDocument.contents.refreshToken;
-        if (aDocument.contents.accessToken.length == 0) {
+        if (aDocument.contents.refreshToken)
+            refreshToken = aDocument.contents.refreshToken;
+        if (aDocument.contents.accessToken && aDocument.contents.accessToken.length > 0) {
+            accessToken = aDocument.contents.accessToken;
+        } else {
             noAccessTokenStored()
         }
     }
-
 }

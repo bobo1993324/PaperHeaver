@@ -47,8 +47,8 @@ MainView {
             settings.storeAccessToken(accessToken);
         }
         onCredentialExpired: {
-            if (settings.refresh_token > 0) {
-                refreshToken = settings.refresh_token;
+            if (settings.refreshToken.length > 0) {
+                refreshToken = settings.refreshToken;
                 requestRefreshToken();
             } else {
                 settings.clear()
@@ -59,11 +59,8 @@ MainView {
     Settings {
         id: settings
         onAccessTokenChanged: {
-            googleDriveModel.accessToken = accessToken
-        }
-
-        onNoAccessTokenStored: {
-
+            if (accessToken.length > 0)
+                googleDriveModel.accessToken = accessToken
         }
     }
 }

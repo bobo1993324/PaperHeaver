@@ -1,18 +1,22 @@
 #include "googledrivemodel.h"
 #include <cassert>
+#include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QMimeDatabase>
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QUrl>
 #include <QUrlQuery>
+#include "filetreeitem.h"
 
 namespace PageHeaver {
 
 GoogleDriveModel::GoogleDriveModel(QObject *parent) :
     QAbstractItemModel(parent)
 {
+    m_fileTreeMap.insert("root", new FileTreeItem(this, "root"));
     connect(&conManager, SIGNAL(finished(QNetworkReply*)), this, SLOT(networkReplyFinished(QNetworkReply*)));
     connect(this, SIGNAL(accessTokenChanged()), this, SLOT(handleAccessTokenChanged()));
 }
@@ -36,27 +40,76 @@ QString GoogleDriveModel::getAuthenticationRquestURL(QString scope)
 
 QModelIndex GoogleDriveModel::index(int row, int column, const QModelIndex &parent) const
 {
-
+    Q_UNUSED(column);
+    if (parent.isValid()) {
+        FileTreeItem * item = static_cast<FileTreeItem *>(parent.internalPointer());
+        return createIndex(row, column, item->getChild(row));
+    } else {
+        return createIndex(row, column, m_fileTreeMap["root"]);
+    }
 }
 
 QModelIndex GoogleDriveModel::parent(const QModelIndex &child) const
 {
-
+    FileTreeItem * item = static_cast<FileTreeItem *>(child.internalPointer());
+    if (!item) {
+        return QModelIndex();
+    }
+    item = item->getContainingFolder();
+    FileTreeItem *pparentItem = item->getContainingFolder();
+    if (!pparentItem) {
+        return createIndex(0, 0, item);
+    } else {
+        return createIndex(pparentItem->indexOf(item), 0, item);
+    }
 }
 
 int GoogleDriveModel::rowCount(const QModelIndex &parent) const
 {
-
+    FileTreeItem * item = static_cast<FileTreeItem *>(parent.internalPointer());
+    assert(item);
+    return item->childCount();
 }
 
 int GoogleDriveModel::columnCount(const QModelIndex &parent) const
 {
-
+    return 1;
 }
 
 QVariant GoogleDriveModel::data(const QModelIndex &index, int role) const
 {
+    FileTreeItem * item = static_cast<FileTreeItem *>(index.internalPointer());
+    switch (role) {
+    case RoleFileTitle:
+        return item->title();
+    case RoleFileMimeType:
+        return item->mimeType();
+    case RoleFileAlternateLink:
+        return item->alternateLink();
+    }
+    return QVariant();
+}
 
+QHash<int, QByteArray> GoogleDriveModel::roleNames() const
+{
+    static QHash<int, QByteArray> roleNames;
+    if (roleNames.isEmpty()) {
+        roleNames[RoleFileTitle] = "title";
+        roleNames[RoleFileMimeType] = "mimeType";
+        roleNames[RoleFileAlternateLink] = "alternateLink";
+    }
+    return roleNames;
+}
+
+QModelIndex GoogleDriveModel::index(FileTreeItem *item)
+{
+    qDebug() << "GoogleDriveModel::index" << item->getId();
+    FileTreeItem *parent = item->getContainingFolder();
+    if (parent) {
+        return createIndex(parent->indexOf(item), 0, item);
+    } else {
+        return createIndex(0, 0, item);
+    }
 }
 
 void GoogleDriveModel::requestAccessToken(QString code)
@@ -148,8 +201,26 @@ void GoogleDriveModel::networkReplyFinished(QNetworkReply * reply)
         setAccessToken(object["access_token"].toString());
         setRefreshToken(object["refresh_token"].toString());
         emit getNewAccessToken();
-    } else if (object["kind"].toString() == "drive#childList") {
-        qDebug() << "TODO handle child list";
+    } else if (object["kind"].toString() == "drive#fileList") {
+        QString urlString = reply->url().toString();
+        QString parentId = urlString.split("%22").at(1);
+        qDebug() << "parentId" << parentId;
+        FileTreeItem *parent = m_fileTreeMap[parentId];
+        QJsonValue itemsValue = object["items"];
+        assert(itemsValue.isArray());
+        QJsonArray itemsArray = itemsValue.toArray();
+
+        beginInsertRows(this->index(parent), 0, itemsArray.size() - 1);
+        for (int i = 0; i < itemsArray.size(); i++) {
+            QString fileId = itemsArray[i].toObject()["id"].toString();
+            FileTreeItem *fileTreeItem = new FileTreeItem(this, fileId, parent->getContainingFolder());
+            fileTreeItem->setTitle(itemsArray[i].toObject()["title"].toString());
+            fileTreeItem->setMimeType(itemsArray[i].toObject()["mimeType"].toString());
+            fileTreeItem->setAlternateLink(itemsArray[i].toObject()["alternateLink"].toString());
+            m_fileTreeMap[fileId] = fileTreeItem;
+            parent->addChild(fileTreeItem);
+        }
+        endInsertRows();
     }
 }
 
@@ -165,9 +236,10 @@ void GoogleDriveModel::requestListChildren(QString parentName)
     QUrl url;
     url.setScheme("https");
     url.setHost("www.googleapis.com");
-    url.setPath(QString("/drive/v2/files/%1/children").arg(parentName));
+    url.setPath("/drive/v2/files");
     QUrlQuery query;
     query.addQueryItem("key", m_clientId);
+    query.addQueryItem("q", "\"root\" in parents");
     url.setQuery(query);
     QNetworkRequest rq(url);
     rq.setRawHeader(QByteArray("Authorization"), ("Bearer " + m_accessToken).toLocal8Bit());
@@ -176,7 +248,30 @@ void GoogleDriveModel::requestListChildren(QString parentName)
 
 void GoogleDriveModel::requestRefreshToken()
 {
-    qDebug() << "GoogleDriveModel::requestRefreshToken";
+    qDebug() << "TODO GoogleDriveModel::requestRefreshToken";
+}
+
+void GoogleDriveModel::requestUploadFile(QString localFileUrl)
+{
+    QUrl url;
+    url.setScheme("https");
+    url.setHost("www.googleapis.com");
+    url.setPath(QString("/upload/drive/v2/files"));
+    QUrlQuery query;
+    query.addQueryItem("uploadType", "media");
+    query.addQueryItem("key", m_clientId);
+    url.setQuery(query);
+    QNetworkRequest rq(url);
+    QFile f(localFileUrl.mid(6));
+    assert(f.exists());
+    rq.setHeader(QNetworkRequest::ContentTypeHeader, QMimeDatabase().mimeTypeForFile(f.fileName()).name());
+    //rq.setHeader(QNetworkRequest::ContentLengthHeader, f.size());
+    rq.setRawHeader(QByteArray("Authorization"), ("Bearer " + m_accessToken).toLocal8Bit());
+    qDebug() << rq.header(QNetworkRequest::ContentTypeHeader) << rq.header(QNetworkRequest::ContentLengthHeader)
+                << f.fileName() << f.exists();
+    f.open(QFile::ReadOnly);
+    conManager.post(rq, f.readAll());
+    f.close();
 }
 
 }
