@@ -1,0 +1,15 @@
+{
+    "architecture": "@CLICK_ARCH@",
+    "description": "description of PaperHeaver",
+    "framework": "ubuntu-sdk-14.10-dev2",
+    "hooks": {
+        "paperheaver": {
+            "apparmor": "paperheaver.apparmor",
+            "desktop": "paperheaver.desktop"
+        }
+    },
+    "maintainer": "Boren Zhang <bobo1993324@gmail.com>",
+    "name": "com.ubuntu.developer.bobo1993324.paperheaver",
+    "title": "PaperHeaver",
+    "version": "0.1"
+}
