@@ -1,6 +1,8 @@
 #include "googledrivemodel.h"
 #include <cassert>
 #include <QFile>
+#include <QFileInfo>
+#include <QHttpPart>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
@@ -201,26 +203,8 @@ void GoogleDriveModel::networkReplyFinished(QNetworkReply * reply)
         setAccessToken(object["access_token"].toString());
         setRefreshToken(object["refresh_token"].toString());
         emit getNewAccessToken();
-    } else if (object["kind"].toString() == "drive#fileList") {
-        QString urlString = reply->url().toString();
-        QString parentId = urlString.split("%22").at(1);
-        qDebug() << "parentId" << parentId;
-        FileTreeItem *parent = m_fileTreeMap[parentId];
-        QJsonValue itemsValue = object["items"];
-        assert(itemsValue.isArray());
-        QJsonArray itemsArray = itemsValue.toArray();
-
-        beginInsertRows(this->index(parent), 0, itemsArray.size() - 1);
-        for (int i = 0; i < itemsArray.size(); i++) {
-            QString fileId = itemsArray[i].toObject()["id"].toString();
-            FileTreeItem *fileTreeItem = new FileTreeItem(this, fileId, parent->getContainingFolder());
-            fileTreeItem->setTitle(itemsArray[i].toObject()["title"].toString());
-            fileTreeItem->setMimeType(itemsArray[i].toObject()["mimeType"].toString());
-            fileTreeItem->setAlternateLink(itemsArray[i].toObject()["alternateLink"].toString());
-            m_fileTreeMap[fileId] = fileTreeItem;
-            parent->addChild(fileTreeItem);
-        }
-        endInsertRows();
+    } else {
+        handleJsonObject(object);
     }
 }
 
@@ -246,6 +230,34 @@ void GoogleDriveModel::requestListChildren(QString parentName)
     conManager.get(rq);
 }
 
+void GoogleDriveModel::handleJsonObject(QJsonObject object)
+{
+    if (object["kind"].toString() == "drive#fileList") {
+        QJsonValue itemsValue = object["items"];
+        assert(itemsValue.isArray());
+        QJsonArray itemsArray = itemsValue.toArray();
+
+        for (int i = 0; i < itemsArray.size(); i++) {
+            handleJsonObject(itemsArray[i].toObject());
+        }
+    } else if (object["kind"].toString() == "drive#file") {
+        QString fileId = object["id"].toString();
+        FileTreeItem *parent = 0;
+        if (object["parents"].toArray()[0].toObject()["isRoot"].toBool()) {
+            parent = m_fileTreeMap["root"];
+        }
+        FileTreeItem *fileTreeItem = new FileTreeItem(this, fileId, parent->getContainingFolder());
+        fileTreeItem->setTitle(object["title"].toString());
+        fileTreeItem->setMimeType(object["mimeType"].toString());
+        fileTreeItem->setAlternateLink(object["alternateLink"].toString());
+
+        beginInsertRows(index(parent), parent->childCount(), parent->childCount());
+        m_fileTreeMap[fileId] = fileTreeItem;
+        parent->addChild(fileTreeItem);
+        endInsertRows();
+    }
+}
+
 void GoogleDriveModel::requestRefreshToken()
 {
     qDebug() << "TODO GoogleDriveModel::requestRefreshToken";
@@ -258,20 +270,33 @@ void GoogleDriveModel::requestUploadFile(QString localFileUrl)
     url.setHost("www.googleapis.com");
     url.setPath(QString("/upload/drive/v2/files"));
     QUrlQuery query;
-    query.addQueryItem("uploadType", "media");
+    query.addQueryItem("uploadType", "multipart");
     query.addQueryItem("key", m_clientId);
     url.setQuery(query);
     QNetworkRequest rq(url);
+
+    QHttpMultiPart *multiPart = new QHttpMultiPart();
+
     QFile f(localFileUrl.mid(6));
-    assert(f.exists());
-    rq.setHeader(QNetworkRequest::ContentTypeHeader, QMimeDatabase().mimeTypeForFile(f.fileName()).name());
-    //rq.setHeader(QNetworkRequest::ContentLengthHeader, f.size());
-    rq.setRawHeader(QByteArray("Authorization"), ("Bearer " + m_accessToken).toLocal8Bit());
-    qDebug() << rq.header(QNetworkRequest::ContentTypeHeader) << rq.header(QNetworkRequest::ContentLengthHeader)
-                << f.fileName() << f.exists();
+    QFileInfo fileInfo(f);
+    QHttpPart textPart;
+    textPart.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    QJsonObject object;
+    object.insert("title", QJsonValue(fileInfo.baseName()));
+    textPart.setBody(QJsonDocument(object).toJson());
+
+    QHttpPart contentPart;
+    contentPart.setHeader(QNetworkRequest::ContentTypeHeader, QMimeDatabase().mimeTypeForFile(f.fileName()).name());
     f.open(QFile::ReadOnly);
-    conManager.post(rq, f.readAll());
+    contentPart.setBody(f.readAll());
     f.close();
+
+    multiPart->append(textPart);
+    multiPart->append(contentPart);
+
+    rq.setRawHeader(QByteArray("Authorization"), ("Bearer " + m_accessToken).toLocal8Bit());
+    QNetworkReply * reply = conManager.post(rq, multiPart);
+    multiPart->setParent(reply);
 }
 
 }

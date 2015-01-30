@@ -33,7 +33,13 @@ Page {
         model: fileModel
         delegate: ListItem.Standard {
             text: title
-            onClicked: Qt.openUrlExternally(alternateLink)
+            onClicked: {
+                pageStack.push(Qt.resolvedUrl("./FileViewPage.qml"),
+                               {
+                                    title: title,
+                                    url: alternateLink
+                               })
+            }
         }
     }
 

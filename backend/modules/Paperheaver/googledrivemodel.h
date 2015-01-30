@@ -70,6 +70,8 @@ private:
     void requestAccessToken(QString code);
     void requestListChildren(QString parentName);
 
+    void handleJsonObject(QJsonObject object);
+
     QNetworkAccessManager conManager;
     QString m_clientId;
     QString m_clientSecret;
