@@ -59,7 +59,7 @@ Page {
         visible: emptyState.visible
         onTriggered: {
             var url = googleDriveModel.getAuthenticationRquestURL(
-                        "https://www.googleapis.com/auth/drive.file");
+                        "https://www.googleapis.com/auth/drive");
             var loginPage = pageStack.push(
                         Qt.resolvedUrl("./LoginPage.qml"), {"url": url});
         }
